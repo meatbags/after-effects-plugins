@@ -3,7 +3,10 @@
 #pragma once
 #ifndef TIMESORT_H
 #define TIMESORT_H
-#define PF_DEEP_COLOR_AWARE 1 // 16bpc flag for AE_Effect.h
+
+// 16bpc flag
+#define PF_DEEP_COLOR_AWARE 1
+
 #include "AEConfig.h"
 #include "entry.h"
 #include "AE_Effect.h"

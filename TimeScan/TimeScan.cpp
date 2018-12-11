@@ -1,6 +1,4 @@
-/**
- ** TimeScan
- **/
+// TimeScan.cpp
 
 #include "TimeScan.h"
 
@@ -109,7 +107,7 @@ static PF_Err Render(
 		AEFX_CLR_STRUCT(checkout);
 		ERR(PF_CHECKOUT_PARAM(in_data, TIMESCAN_INPUT, time, in_data->time_step, in_data->time_scale, &checkout));
 
-		// Set rect
+		// Copy sample to buffer
 		if (mode == 1) {
 			if (mirror_enabled) {
 				dst.left = centre + index * scale;
@@ -118,7 +116,7 @@ static PF_Err Render(
 			}
 			dst.left = centre - index * scale;
 			dst.right = dst.left + scale;
-			ERR(suites.WorldTransformSuite1()->copy(in_data->effect_ref, &checkout.u.ld, &buffer, &src, index == 0 ? NULL : &dst));
+			ERR(suites.WorldTransformSuite1()->copy(in_data->effect_ref, &checkout.u.ld, &buffer, &src, &dst));
 		} else {
 			if (mirror_enabled) {
 				dst.top = centre + index * scale;
@@ -127,8 +125,26 @@ static PF_Err Render(
 			}
 			dst.top = centre - index * scale;
 			dst.bottom = dst.top + scale;
-			ERR(suites.WorldTransformSuite1()->copy(in_data->effect_ref, &checkout.u.ld, &buffer, &src, index == 0 ? NULL : &dst));
+			ERR(suites.WorldTransformSuite1()->copy(in_data->effect_ref, &checkout.u.ld, &buffer, &src, &dst));
 		}
+
+		// Fill time gap
+		if (time == 0) {
+			if (mirror_enabled) {
+				dst.left = mode == 1 ? centre + (index + 1) * scale : dst.left;
+				dst.right = mode == 1 ? in_data->output_origin_x + input_layer->width : dst.right;
+				dst.top = mode == 1 ? dst.top : centre + (index + 1) * scale;
+				dst.bottom = mode == 1 ? dst.bottom : in_data->output_origin_y + input_layer->height;
+				ERR(suites.WorldTransformSuite1()->copy(in_data->effect_ref, &checkout.u.ld, &buffer, &src, &dst));
+			}
+			dst.left = mode == 1 ? in_data->output_origin_x : dst.left;
+			dst.right = mode == 1 ? centre - index * scale : dst.right;
+			dst.top = mode == 1 ? dst.top : in_data->output_origin_y;
+			dst.bottom = mode == 1 ? dst.bottom : centre - index * scale;
+			ERR(suites.WorldTransformSuite1()->copy(in_data->effect_ref, &checkout.u.ld, &buffer, &src, &dst));
+		}
+
+		// Check in layer
 		ERR2(PF_CHECKIN_PARAM(in_data, &checkout));
 
 		// Update settings
