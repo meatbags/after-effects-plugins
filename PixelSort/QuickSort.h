@@ -4,21 +4,17 @@
 #include "PixelSort.h"
 
 void swap8(Pixel8Data *a, Pixel8Data *b) {
-	// cache a
+	// swap pixel data values
 	A_u_char alpha = a->p.alpha;
 	A_u_char red = a->p.red;
 	A_u_char green = a->p.green;
 	A_u_char blue = a->p.blue;
 	double value = a->value;
-
-	// b -> a
 	a->p.alpha = b->p.alpha;
 	a->p.red = b->p.red;
 	a->p.green = b->p.green;
 	a->p.blue = b->p.blue;
 	a->value = b->value;
-
-	// cache -> b
 	b->p.alpha = alpha;
 	b->p.red = red;
 	b->p.green = green;

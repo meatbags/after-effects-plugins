@@ -55,7 +55,7 @@ resource 'PiPL' (16000) {
 		},
 		/* [11] */
 		AE_Effect_Match_Name {
-			"ADBE_PixelSort_v1"
+			"ADBE_PixelSort_v20"
 		},
 		/* [12] */
 		AE_Reserved_Info {

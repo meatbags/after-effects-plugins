@@ -55,13 +55,13 @@ static PF_Err ParamsSetup(
 	AEFX_CLR_STRUCT(def);
 	PF_ADD_ANGLE("Direction", 0, PIXELSORT_DIRECTION);
 	AEFX_CLR_STRUCT(def);
-	PF_ADD_FLOAT_SLIDERX("Lower Threshold Input", 0, 100, 0, 100, lower_dflt, PF_Precision_TENTHS, NULL, NULL, PIXELSORT_LOWER_IN);
+	PF_ADD_FLOAT_SLIDERX("Lower", 0, 100, 0, 100, lower_dflt, PF_Precision_TENTHS, NULL, NULL, PIXELSORT_LOWER);
 	AEFX_CLR_STRUCT(def);
-	PF_ADD_FLOAT_SLIDERX("Upper Threshold Input", 0, 100, 0, 100, upper_dflt, PF_Precision_TENTHS, NULL, NULL, PIXELSORT_UPPER_IN);
+	PF_ADD_FLOAT_SLIDERX("Upper", 0, 100, 0, 100, upper_dflt, PF_Precision_TENTHS, NULL, NULL, PIXELSORT_UPPER);
 	AEFX_CLR_STRUCT(def);
-	PF_ADD_FLOAT_SLIDERX("Lower Threshold Output", 0, 100, 0, 100, lower_dflt, PF_Precision_TENTHS, NULL, NULL, PIXELSORT_LOWER_OUT);
+	PF_ADD_FLOAT_SLIDERX("Lower Padding", 0, 100, 0, 100, 0, PF_Precision_TENTHS, NULL, NULL, PIXELSORT_LOWER_PADDING);
 	AEFX_CLR_STRUCT(def);
-	PF_ADD_FLOAT_SLIDERX("Upper Threshold Output", 0, 100, 0, 100, upper_dflt, PF_Precision_TENTHS, NULL, NULL, PIXELSORT_UPPER_OUT);
+	PF_ADD_FLOAT_SLIDERX("Upper Padding", 0, 100, 0, 100, 0, PF_Precision_TENTHS, NULL, NULL, PIXELSORT_UPPER_PADDING);
 	AEFX_CLR_STRUCT(def);
 	PF_ADD_POPUPX("Sort Order", 4, 1, "Ascending|Descending|Peak|Trough", NULL, PIXELSORT_ORDER);
 	AEFX_CLR_STRUCT(def);
@@ -88,34 +88,33 @@ static PF_Err Sort8(
 	PixelSortInfo *info = (PixelSortInfo*)refcon;
 
 	// Snap x, y to rotated grid
-	/*
-	double x = (xL - info->centre_x) + 0.5;
-	double y = (yL - info->centre_y) + 0.5;
-	double grid_distance = x * info->vec_x + y * info->vec_y;
-	double grid_offset = round(grid_distance) - grid_distance;
-	double grid_distance_perp = x * -info->vec_y + y * info->vec_x;
-	double grid_offset_perp = round(grid_distance_perp) - grid_distance_perp;
-	x += info->vec_x * grid_offset + (-info->vec_y * grid_offset_perp);
-	y += info->vec_y * grid_offset + info->vec_x * grid_offset_perp;
-	x += info->centre_x;
-	y += info->centre_y;
-	*/
 	double x = xL + 0.5;
 	double y = yL + 0.5;
 
 	// Set search vector
-	//double theta = fmod(info->direction, PF_PI / 2) + PF_PI / 4;
-	//double scale = 1 + (PF_SQRT2 - 1) * abs(sin(theta));
-	double step_x, step_y;
-	if (info->use_displacement) {
-		PF_Pixel8 *p = getPixel(info->map, xL % info->map->width, yL % info->map->height);
-		double weight = (((p->red + p->green + p->blue) / (double)PF_MAX_CHAN8) / 3.0) * 2 - 1;
-		double angle = info->direction + (weight * PF_PI * 2 * info->displacement_scale);
-		step_x = cos(angle);
-		step_y = sin(angle);
-	} else {
+	double dir, step_x, step_y;
+	int max_search_size;
+	if (info->type == 1) {
+		dir = info->direction;
 		step_x = info->vec_x;
 		step_y = info->vec_y;
+		max_search_size = info->layer->width + info->layer->height;
+	} else {
+		double dx = xL - info->centre_x;
+		double dy = yL - info->centre_y;
+		dir = atan2(dy, dx);
+		step_x = cos(dir);
+		step_y = sin(dir);
+		max_search_size = (int)round(hypot(dx, dy));
+	}
+
+	// Apply displacement
+	if (info->use_displacement) {
+		PF_Pixel8 *p = getPixel8(info->map, xL % info->map->width, yL % info->map->height);
+		double weight = (((p->red + p->green + p->blue) / (double)PF_MAX_CHAN8) / 3.0) * 2 - 1;
+		double angle = dir + (PF_PI * 2 * weight * info->displacement_scale);
+		step_x = cos(angle);
+		step_y = sin(angle);
 	}
 
 	// Find start or chunk or screen edge
@@ -123,8 +122,8 @@ static PF_Err Sort8(
 	int samp_y = (int)floor(y);
 	int chunk_size = 0;
 	bool valid_pixel = true;
-	while (valid_pixel && isOnScreen(info->layer, samp_x, samp_y)) {
-		Pixel8Data p = getPixel8Data(getPixel(info->layer, samp_x, samp_y));
+	while (valid_pixel && isOnScreen(info->layer, samp_x, samp_y) && chunk_size < max_search_size) {
+		Pixel8Data p = getPixel8Data(getPixel8(info->layer, samp_x, samp_y));
 		valid_pixel = filter(p.value, info->lower_in, info->upper_in);
 		if (valid_pixel) {
 			chunk_size++;
@@ -163,7 +162,7 @@ static PF_Err Sort8(
 		chunk_size = 0;
 		for (int i = 0; i < info->chunk_size; i++) {
 			if (isOnScreen(info->layer, samp_x, samp_y)) {
-				Pixel8Data p = getPixel8Data(getPixel(info->layer, samp_x, samp_y));
+				Pixel8Data p = getPixel8Data(getPixel8(info->layer, samp_x, samp_y));
 				if (filter(p.value, info->lower_out, info->upper_out)) {
 					pixels[i] = p;
 					index_last = i;
@@ -237,10 +236,10 @@ static PF_Err Render(
 	info.sort_by = params[PIXELSORT_KEY]->u.pd.value;
 	info.chunk_size = (int)round(params[PIXELSORT_CHUNK_SIZE]->u.sd.value * scale);
 	info.direction = (FIX2D(params[PIXELSORT_DIRECTION]->u.ad.value) - 90) * PF_RAD_PER_DEGREE;
-	info.lower_in = params[PIXELSORT_LOWER_IN]->u.fs_d.value / 100.0;
-	info.upper_in = params[PIXELSORT_UPPER_IN]->u.fs_d.value / 100.0;
-	info.lower_out = params[PIXELSORT_LOWER_OUT]->u.fs_d.value / 100.0;
-	info.upper_out = params[PIXELSORT_UPPER_OUT]->u.fs_d.value / 100.0;
+	info.lower_in = params[PIXELSORT_LOWER]->u.fs_d.value / 100.0;
+	info.upper_in = params[PIXELSORT_UPPER]->u.fs_d.value / 100.0;
+	info.lower_out = max(0.0, info.lower_in - (params[PIXELSORT_LOWER_PADDING]->u.fs_d.value / 100.0));
+	info.upper_out = min(1.0, info.upper_in + (params[PIXELSORT_UPPER_PADDING]->u.fs_d.value / 100.0));
 	info.order_by = params[PIXELSORT_ORDER]->u.pd.value;
 	info.centre_x = FIX2D(params[PIXELSORT_CENTRE]->u.td.x_value);
 	info.centre_y = FIX2D(params[PIXELSORT_CENTRE]->u.td.y_value);
@@ -273,6 +272,8 @@ static PF_Err Render(
 		A_long lines = output->extent_hint.bottom - output->extent_hint.top;
 		if (!world_is_deep) {
 			ERR(suites.Iterate8Suite1()->iterate(in_data, 0, lines, input_layer, NULL, (void*)&info, Sort8, output));
+		} else {
+			// 16 bit
 		}
 	}
 
@@ -295,7 +296,7 @@ PF_Err PluginDataEntryFunction(
 		inPtr,
 		inPluginDataCallBackPtr,
 		"PixelSort", // Name
-		"ADBE_PixelSort_v1", // Match Name
+		"ADBE_PixelSort_v20", // Match Name
 		"Meatbags", // Category
 		AE_RESERVED_INFO
 	);

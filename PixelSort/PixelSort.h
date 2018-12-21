@@ -40,10 +40,10 @@ enum {
 	PIXELSORT_KEY,
 	PIXELSORT_CHUNK_SIZE,
 	PIXELSORT_DIRECTION,
-	PIXELSORT_LOWER_IN,
-	PIXELSORT_UPPER_IN,
-	PIXELSORT_LOWER_OUT,
-	PIXELSORT_UPPER_OUT,
+	PIXELSORT_LOWER,
+	PIXELSORT_UPPER,
+	PIXELSORT_LOWER_PADDING,
+	PIXELSORT_UPPER_PADDING,
 	PIXELSORT_ORDER,
 	PIXELSORT_CENTRE,
 	PIXELSORT_DISPLACEMENT,
@@ -51,21 +51,31 @@ enum {
 	PIXELSORT_NUM_PARAMS
 };
 
-typedef struct {
-	PF_Pixel8 p;
-	double value;
-} Pixel8Data;
 
 bool isOnScreen(PF_LayerDef *layer, int x, int y) {
 	return (x > -1 && y > -1 && x < layer->width && y < layer->height);
 }
 
-PF_Pixel8 *getPixel(PF_LayerDef *layer, int x, int y) {
+bool filter(double value, double lower, double upper) {
+	return (value >= lower && value <= upper);
+}
+
+typedef struct {
+	PF_Pixel16 p;
+	double value;
+} Pixel16Data;
+
+typedef struct {
+	PF_Pixel8 p;
+	double value;
+} Pixel8Data;
+
+PF_Pixel8 *getPixel8(PF_LayerDef *layer, int x, int y) {
 	return (PF_Pixel8*)((char *)layer->data + (y * layer->rowbytes) + (x * sizeof(PF_Pixel8)));
 }
 
-bool filter(double value, double lower, double upper) {
-	return (value >= lower && value <= upper);
+PF_Pixel16 *getPixel16(PF_LayerDef *layer, int x, int y) {
+	return (PF_Pixel16*)((char *)layer->data + (y * layer->rowbytes) + (x * sizeof(PF_Pixel16)));
 }
 
 Pixel8Data getPixel8Data(PF_Pixel8 *p) {
@@ -75,6 +85,16 @@ Pixel8Data getPixel8Data(PF_Pixel8 *p) {
 	res.p.green = p->green;
 	res.p.blue = p->blue;
 	res.value = ((p->red + p->green + p->blue) / (double)PF_MAX_CHAN8) / 3.0;
+	return res;
+}
+
+Pixel16Data getPixel16Data(PF_Pixel8 *p) {
+	Pixel16Data res;
+	res.p.alpha = p->alpha;
+	res.p.red = p->red;
+	res.p.green = p->green;
+	res.p.blue = p->blue;
+	res.value = ((p->red + p->green + p->blue) / (double)PF_MAX_CHAN16) / 3.0;
 	return res;
 }
 
