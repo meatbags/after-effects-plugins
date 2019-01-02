@@ -49,6 +49,10 @@ static PF_Err ParamsSetup(
 	PF_ADD_SLIDER("Auto Pan Speed", 1, 1000, 1, 100, speed, TIMESCAN_AUTOPAN_SPEED);
 	AEFX_CLR_STRUCT(def);
 	PF_ADD_CHECKBOXX("Mirror", 0, NULL, TIMESCAN_MIRROR);
+	AEFX_CLR_STRUCT(def);
+	PF_ADD_FLOAT_SLIDERX("Sample Drift", 0, 100, 0, 5, 0, PF_Precision_HUNDREDTHS, 0, 0, TIMESCAN_STEP);
+	AEFX_CLR_STRUCT(def);
+	PF_ADD_CHECKBOXX("Interpolate Time", 1, NULL, TIMESCAN_INTERPOLATE);
 	out_data->num_params = TIMESCAN_NUM_PARAMS;
 	
 	return PF_Err_NONE;
@@ -64,92 +68,122 @@ static PF_Err Render(
 	PF_Err err2 = PF_Err_NONE;
 	AEGP_SuiteHandler suites(in_data->pica_basicP);
 	PF_LayerDef *input_layer = &params[TIMESCAN_INPUT]->u.ld;
-	float qscale = input_layer->width / (float)in_data->width;
+	int qscale = max(1, (int)round((float)in_data->width / input_layer->width));
 
 	// Create output buffer
 	PF_LayerDef buffer;
 	suites.WorldSuite1()->new_world(in_data->effect_ref, input_layer->width, input_layer->height, PF_NewWorldFlag_CLEAR_PIXELS, &buffer);
+	
+	// Get UI settings
 	int mode = params[TIMESCAN_MODE]->u.pd.value;
 	A_long x = FIX2LONG(params[TIMESCAN_POSITION]->u.td.x_value);
 	A_long y = FIX2LONG(params[TIMESCAN_POSITION]->u.td.y_value);
-	int scale = max(1, (int)round(params[TIMESCAN_SCALE]->u.sd.value * qscale));
+	double sample_step = params[TIMESCAN_STEP]->u.fs_d.value;
+	int size = params[TIMESCAN_SCALE]->u.sd.value;
 	int mirror_enabled = params[TIMESCAN_MIRROR]->u.button_d.value;
+	int interpolate_time = params[TIMESCAN_INTERPOLATE]->u.button_d.value;
 
-	// Autopan x, y values
+	// Set Autopan position
 	if (params[TIMESCAN_AUTOPAN]->u.button_d.value) {
-		int speed = max(1, (int)round(params[TIMESCAN_AUTOPAN_SPEED]->u.sd.value * qscale));
+		int speed = params[TIMESCAN_AUTOPAN_SPEED]->u.sd.value / qscale;
 		double t = in_data->current_time / (double)in_data->time_scale;
-		x = x + (int)round(t * speed);
-		y = y + (int)round(t * speed);
-		x = (x / input_layer->width) % 2 == 0 ? input_layer->width - (x % input_layer->width) - 1 : x % input_layer->width;
-		y = (y / input_layer->height) % 2 == 0 ? input_layer->height - (y % input_layer->height) - 1 : y % input_layer->height;
+		x = mirror(x + (int)round(t * speed), input_layer->width);
+		y = mirror(y + (int)round(t * speed), input_layer->height);
 	}
-
-	// Settings
-	A_long time = in_data->current_time;
+	
+	// Sample rect
 	PF_Rect src, dst;
 	src.left = mode == 1 ? x : in_data->output_origin_x;
 	src.right = src.left + (mode == 1 ? 1 : input_layer->width);
 	src.top = mode == 1 ? in_data->output_origin_y : y;
 	src.bottom = src.top + (mode == 1 ? input_layer->height : 1);
+	
+	// Destination rect
 	dst.left = in_data->output_origin_x;
 	dst.right = dst.left + input_layer->width;
 	dst.top = in_data->output_origin_y;
 	dst.bottom = dst.top + input_layer->height;
 	A_long centre = (mirror_enabled)
-		? (mode == 1 ? input_layer->width / 2 : input_layer->height / 2) - scale / 2
+		? (mode == 1 ? input_layer->width / 2 : input_layer->height / 2) - size / 2
 		: (mode == 1 ? input_layer->width : input_layer->height);
-	int index = 0;
 
-	while (!err && time >= 0 && dst.right >= in_data->output_origin_x && dst.bottom >= in_data->output_origin_y) {
+	// Iteration settings
+	bool complete = false;
+	int index = 0;
+	A_long time = in_data->current_time;
+	A_long time_step = in_data->time_step * qscale;
+
+	// Time interpolation
+	if (interpolate_time) {
+		time_step = (A_long)round(time_step / (float)size);
+		sample_step /= size;
+		size = 1;
+	}
+	
+	while (!err && !complete && dst.right >= in_data->output_origin_x && dst.bottom >= in_data->output_origin_y) {
 		// Get sample layer
 		PF_ParamDef checkout;
 		AEFX_CLR_STRUCT(checkout);
 		ERR(PF_CHECKOUT_PARAM(in_data, TIMESCAN_INPUT, time, in_data->time_step, in_data->time_scale, &checkout));
 
+		// Step sample point
+		if (sample_step) {
+			if (mode == 1) {
+				src.left = mirror(x + (int)round(index * sample_step), input_layer->width);
+				src.right = src.left + 1;
+			} else {
+				src.top = mirror(y + (int)round(index * sample_step), input_layer->height);
+				src.bottom = src.top + 1;
+			}
+		}
+
 		// Copy sample to buffer
 		if (mode == 1) {
 			if (mirror_enabled) {
-				dst.left = centre + index * scale;
-				dst.right = dst.left + scale;
+				dst.left = centre + index * size;
+				dst.right = dst.left + size;
 				ERR(suites.WorldTransformSuite1()->copy(in_data->effect_ref, &checkout.u.ld, &buffer, &src, &dst));
 			}
-			dst.left = centre - index * scale;
-			dst.right = dst.left + scale;
+			dst.left = centre - index * size;
+			dst.right = dst.left + size;
 			ERR(suites.WorldTransformSuite1()->copy(in_data->effect_ref, &checkout.u.ld, &buffer, &src, &dst));
 		} else {
 			if (mirror_enabled) {
-				dst.top = centre + index * scale;
-				dst.bottom = dst.top + scale;
+				dst.top = centre + index * size;
+				dst.bottom = dst.top + size;
 				ERR(suites.WorldTransformSuite1()->copy(in_data->effect_ref, &checkout.u.ld, &buffer, &src, &dst));
 			}
-			dst.top = centre - index * scale;
-			dst.bottom = dst.top + scale;
+			dst.top = centre - index * size;
+			dst.bottom = dst.top + size;
 			ERR(suites.WorldTransformSuite1()->copy(in_data->effect_ref, &checkout.u.ld, &buffer, &src, &dst));
 		}
 
 		// Fill time gap
 		if (time == 0) {
 			if (mirror_enabled) {
-				dst.left = mode == 1 ? centre + (index + 1) * scale : dst.left;
+				dst.left = mode == 1 ? centre + (index + 1) * size : dst.left;
 				dst.right = mode == 1 ? in_data->output_origin_x + input_layer->width : dst.right;
-				dst.top = mode == 1 ? dst.top : centre + (index + 1) * scale;
+				dst.top = mode == 1 ? dst.top : centre + (index + 1) * size;
 				dst.bottom = mode == 1 ? dst.bottom : in_data->output_origin_y + input_layer->height;
 				ERR(suites.WorldTransformSuite1()->copy(in_data->effect_ref, &checkout.u.ld, &buffer, &src, &dst));
 			}
 			dst.left = mode == 1 ? in_data->output_origin_x : dst.left;
-			dst.right = mode == 1 ? centre - index * scale : dst.right;
+			dst.right = mode == 1 ? centre - index * size : dst.right;
 			dst.top = mode == 1 ? dst.top : in_data->output_origin_y;
-			dst.bottom = mode == 1 ? dst.bottom : centre - index * scale;
+			dst.bottom = mode == 1 ? dst.bottom : centre - index * size;
 			ERR(suites.WorldTransformSuite1()->copy(in_data->effect_ref, &checkout.u.ld, &buffer, &src, &dst));
 		}
 
 		// Check in layer
 		ERR2(PF_CHECKIN_PARAM(in_data, &checkout));
 
-		// Update settings
+		// Update iterator
 		index += 1;
-		time -= in_data->time_step;
+		if (time > 0) {
+			time = max(0, time - time_step);
+		} else {
+			complete = true;
+		}
 	}
 
 	// Copy to output
@@ -171,7 +205,7 @@ PF_Err PluginDataEntryFunction(
 		inPtr,
 		inPluginDataCallBackPtr,
 		"TimeScan", // Name
-		"ADBE_TimeScan_v1", // Match Name
+		"ADBE_TimeScan_v2", // Match Name
 		"Meatbags", // Category
 		AE_RESERVED_INFO
 	);

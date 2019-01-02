@@ -35,6 +35,10 @@
 #define FIX2D(x) (x / ((double)(1L << 16)))
 #define FIX2LONG(x) (x / (1L << 16));
 
+A_long mirror(A_long x, A_long x_max) {
+	return (x / x_max) % 2 == 0 ? x_max - (x % x_max) - 1 : x % x_max;
+}
+
 enum {
 	TIMESCAN_INPUT = 0,
 	TIMESCAN_MODE,
@@ -43,6 +47,8 @@ enum {
 	TIMESCAN_AUTOPAN,
 	TIMESCAN_AUTOPAN_SPEED,
 	TIMESCAN_MIRROR,
+	TIMESCAN_STEP,
+	TIMESCAN_INTERPOLATE,
 	TIMESCAN_NUM_PARAMS
 };
 
