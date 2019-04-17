@@ -53,6 +53,8 @@ static PF_Err ParamsSetup(
 	PF_ADD_FLOAT_SLIDERX("Sample Drift", 0, 100, 0, 5, 0, PF_Precision_HUNDREDTHS, 0, 0, TIMESCAN_STEP);
 	AEFX_CLR_STRUCT(def);
 	PF_ADD_CHECKBOXX("Interpolate Time", 1, NULL, TIMESCAN_INTERPOLATE);
+	AEFX_CLR_STRUCT(def);
+	PF_ADD_CHECKBOXX("Limit Frame Usage", 0, NULL, TIMESCAN_LIMIT_FRAMES);
 	out_data->num_params = TIMESCAN_NUM_PARAMS;
 	
 	return PF_Err_NONE;
@@ -82,6 +84,7 @@ static PF_Err Render(
 	int size = params[TIMESCAN_SCALE]->u.sd.value;
 	int mirror_enabled = params[TIMESCAN_MIRROR]->u.button_d.value;
 	int interpolate_time = params[TIMESCAN_INTERPOLATE]->u.button_d.value;
+	int limit_frames = params[TIMESCAN_LIMIT_FRAMES]->u.button_d.value;
 
 	// Set Autopan position
 	if (params[TIMESCAN_AUTOPAN]->u.button_d.value) {
@@ -118,6 +121,12 @@ static PF_Err Render(
 		time_step = (A_long)round(time_step / (float)size);
 		sample_step /= size;
 		size = 1;
+	}
+
+	// Limit frames mode
+	if (limit_frames) {
+		A_long time_max = time_step * (centre / size);
+		time = min(time, time_max);
 	}
 	
 	while (!err && !complete && dst.right >= in_data->output_origin_x && dst.bottom >= in_data->output_origin_y) {
