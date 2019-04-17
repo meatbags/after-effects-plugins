@@ -56,7 +56,7 @@ resource 'PiPL' (16000) {
 		},
 		/* [11] */
 		AE_Effect_Match_Name {
-			"ADBE_TimeScan_v3"
+			"ADBE_TimeScan_v4"
 		},
 		/* [12] */
 		AE_Reserved_Info {

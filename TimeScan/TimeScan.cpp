@@ -55,6 +55,8 @@ static PF_Err ParamsSetup(
 	PF_ADD_CHECKBOXX("Interpolate Time", 1, NULL, TIMESCAN_INTERPOLATE);
 	AEFX_CLR_STRUCT(def);
 	PF_ADD_CHECKBOXX("Limit Frame Usage", 0, NULL, TIMESCAN_LIMIT_FRAMES);
+	AEFX_CLR_STRUCT(def);
+	PF_ADD_FLOAT_SLIDERX("Time offset", 0, 100, 0, 10, 0, PF_Precision_TENTHS, 0, 0, TIMESCAN_TIME_OFFSET);
 	out_data->num_params = TIMESCAN_NUM_PARAMS;
 	
 	return PF_Err_NONE;
@@ -85,6 +87,7 @@ static PF_Err Render(
 	int mirror_enabled = params[TIMESCAN_MIRROR]->u.button_d.value;
 	int interpolate_time = params[TIMESCAN_INTERPOLATE]->u.button_d.value;
 	int limit_frames = params[TIMESCAN_LIMIT_FRAMES]->u.button_d.value;
+	A_long time_offset = (A_long)(params[TIMESCAN_TIME_OFFSET]->u.fs_d.value * in_data->time_scale);
 
 	// Set Autopan position
 	if (params[TIMESCAN_AUTOPAN]->u.button_d.value) {
@@ -113,7 +116,7 @@ static PF_Err Render(
 	// Iteration settings
 	bool complete = false;
 	int index = 0;
-	A_long time = in_data->current_time;
+	A_long time = in_data->current_time + time_offset;
 	A_long time_step = in_data->time_step * qscale;
 
 	// Time interpolation
@@ -125,7 +128,7 @@ static PF_Err Render(
 
 	// Limit frames mode
 	if (limit_frames) {
-		A_long time_max = time_step * (centre / size);
+		A_long time_max = time_step * (centre / size) + time_offset;
 		time = min(time, time_max);
 	}
 	
@@ -168,7 +171,7 @@ static PF_Err Render(
 		}
 
 		// Fill time gap
-		if (time == 0) {
+		if (time == time_offset) {
 			if (mirror_enabled) {
 				dst.left = mode == 1 ? centre + (index + 1) * size : dst.left;
 				dst.right = mode == 1 ? in_data->output_origin_x + input_layer->width : dst.right;
@@ -188,8 +191,8 @@ static PF_Err Render(
 
 		// Update iterator
 		index += 1;
-		if (time > 0) {
-			time = max(0, time - time_step);
+		if (time > time_offset) {
+			time = max(time_offset, time - time_step);
 		} else {
 			complete = true;
 		}
