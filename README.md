@@ -1,7 +1,11 @@
-This repository contains all the plugins I've written with the After Effects SDK. To install, [download the files](https://github.com/meatbags/after-effects-plugins/tree/master/build) and copy them to your AE plugin directory, for example `C:\Program Files\Adobe\Adobe After Effects [version]\Support Files\Plug-ins`. If you wish to modify or compile the plugins yourself, you can [get the SDK here](https://www.adobe.io/apis/creativecloud/aftereffects.html).
+A collection of AE plugins written with the After Effects SDK.
+
+To compile them yourself, [get the After Effects SDK](https://www.adobe.io/apis/creativecloud/aftereffects.html).
+
+To install, [download the files](https://github.com/meatbags/after-effects-plugins/tree/master/build) and copy them to your AE plugin directory (ie: `C:\Program Files\Adobe\Adobe After Effects [version]\Support Files\Plug-ins`).
 
 # Halftone
-A colour half-tone plugin with lot's of options. Sizes, shapes, and independent channel rotation.
+A colour half-tone plugin with lots of options. Sizes, shapes, and independent channel rotation.
 
 # PixelSort
 A pixel-sorting Swiss-army-knife. Contains traditional pixel-sorting options, directional and radial sorting, and the option to distort search vectors with a displacement map.
