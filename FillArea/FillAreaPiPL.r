@@ -11,7 +11,7 @@ resource 'PiPL' (16000) {
 			AEEffect
 		},
 		Name {
-			"Normal"
+			"FillArea"
 		},
 		Category {
 			"Meatbags"
@@ -50,7 +50,7 @@ resource 'PiPL' (16000) {
 			0x00000000
 		},
 		AE_Effect_Match_Name {
-			"ADBE_Normal_v1.2"
+			"ADBE_FILL_AREA_V4"
 		},
 		AE_Reserved_Info {
 			0

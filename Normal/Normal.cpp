@@ -1,19 +1,89 @@
 #include "Normal.hpp"
 
-PF_Pixel16 *getPixel16(
-	PF_EffectWorld *inputP,
-	int x,
-	int y
+static PF_Err Normal8(
+	void *refcon,
+	A_long xL,
+	A_long yL,
+	PF_Pixel8 *inP,
+	PF_Pixel8 *outP
 ) {
-	return ((PF_Pixel16 *)((char*)inputP->data + (y * inputP->rowbytes) + x * sizeof(PF_Pixel16)));
-}
+	PF_Err err = PF_Err_NONE;
+	register NormalInfo *info = (NormalInfo*)refcon;
 
-PF_Pixel8 *getPixel8(
-	PF_EffectWorld *inputP,
-	int x,
-	int y
-) {
-	return ((PF_Pixel8 *)((char*)inputP->data + (y * inputP->rowbytes) + x * sizeof(PF_Pixel8)));
+	// FIRST PASS -- SOBEL FILTER
+	double TL = intensity8(info->ref, xL - 1, yL - 1);
+	double T  = intensity8(info->ref, xL, yL - 1);
+	double TR = intensity8(info->ref, xL + 1, yL + 1);
+	double R  = intensity8(info->ref, xL + 1, yL);
+	double L  = intensity8(info->ref, xL - 1, yL);
+	double BL = intensity8(info->ref, xL - 1, yL + 1);
+	double B  = intensity8(info->ref, xL, yL + 1);
+	double BR = intensity8(info->ref, xL + 1, yL + 1);
+	double nx = (TR + 2.0 * R + BR) - (TL + 2.0 * L + BL);
+	double ny = (BL + 2.0 * B + BR) - (TL + 2.0 * T + TR);
+	double nz = 1.0 / info->strength;
+	double mag = sqrt(nx*nx + ny*ny + nz*nz);
+	if (mag != 0) {
+		nx /= mag;
+		ny /= mag;
+		nz /= mag;
+	}
+
+	// SECOND PASS -- SAMPLER
+	if (info->useSampler) {
+		// source pixel intensity
+		double source_sample = intensity8(info->ref, xL, yL);
+		double sx = 0;
+		double sy = 0;
+		double sz = 1.0 / info->strength;
+		for (int i = 0; i < info->samples; ++i) {
+			// generate pseudo-random offset
+			double noise_s = source_sample;
+			double noise_x = xL * ((xL + yL) % 2 == 0 ? 1 : -1);
+			double noise_y = yL * ((xL + yL) % 2 == 0 ? 1 : -1);
+			double noise_i = i / 100.0 * (source_sample > 0.5 ? 1 : -1) * ((xL + yL) % 2 == 0 ? 1 : -1);
+			double rand1 = prand(noise_x + noise_s, noise_y + noise_s, info->seed + noise_i);
+			double rand2 = prand(noise_y - noise_s, noise_x - noise_s, info->seed - noise_i);
+			double angle = rand1 * PI_2;
+			double dist = rand2 * info->sample_radius;
+			double sin_a = sin(angle);
+			double cos_a = cos(angle);
+			int samp_x = (int)round(xL + cos_a * dist);
+			int samp_y = (int)round(yL + sin_a * dist);
+
+			// sample intensity at offset
+			double sample = intensity8(info->ref, samp_x, samp_y);
+			if (sample != source_sample) {
+				double f = dist / info->sample_radius;
+				double t = 1.0 - (f + (f - f*f));
+				sx += cos_a * t * sample;
+				sy += sin_a * t * sample;
+			}
+		}
+		double mag = sqrt(sx*sx + sy*sy + sz*sz);
+		if (mag != 0) {
+			sx /= mag;
+			sy /= mag;
+			sz /= mag;
+		}
+		nx = blend(nx, sx, info->blend);
+		ny = blend(ny, sy, info->blend);
+		nz = blend(nz, sz, info->blend);
+	}
+
+
+	// INVERT
+	if (info->invert) {
+		nx *= -1;
+		ny *= -1;
+	}
+
+	// SET PIXEL
+	outP->alpha = inP->alpha;
+	outP->red = (A_u_char)(((nx + 1) / 2) * PF_MAX_CHAN8);
+	outP->green = (A_u_char)(((ny + 1) / 2) * PF_MAX_CHAN8);
+	outP->blue = (A_u_char)(((nz + 1) / 2) * PF_MAX_CHAN8);
+	return err;
 }
 
 static PF_Err Normal16(
@@ -26,93 +96,75 @@ static PF_Err Normal16(
 	PF_Err err = PF_Err_NONE;
 	register NormalInfo *info = (NormalInfo*)refcon;
 
-	// get pixel intensity
-	int width = info->ref->width - 1;
-	int height = info->ref->height - 1;
-	double TL = getIntensity16(getPixel16(info->ref, clamp(xL - 1, width), clamp(yL - 1, height)));
-	double T  = getIntensity16(getPixel16(info->ref, xL, clamp(yL - 1, height)));
-	double TR = getIntensity16(getPixel16(info->ref, clamp(xL + 1, width), clamp(yL + 1, height)));
-	double R  = getIntensity16(getPixel16(info->ref, clamp(xL + 1, width), yL));
-	double L  = getIntensity16(getPixel16(info->ref, clamp(xL - 1, width), yL));
-	double BL = getIntensity16(getPixel16(info->ref, clamp(xL - 1, width), clamp(yL + 1, height)));
-	double B  = getIntensity16(getPixel16(info->ref, xL, clamp(yL + 1, height)));
-	double BR = getIntensity16(getPixel16(info->ref, clamp(xL + 1, width), clamp(yL + 1, height)));
-
-	// Sobel filter
-	double dX = (TR + 2.0 * R + BR) - (TL + 2.0 * L + BL);
-	double dY = (BL + 2.0 * B + BR) - (TL + 2.0 * T + TR);
-	double dZ = 1.0 / info->strength;
-
-	// normalise
-	double mag = sqrt(dX * dX + dY * dY + dZ * dZ);
+	// FIRST PASS -- SOBEL FILTER
+	double TL = intensity16(info->ref, xL - 1, yL - 1);
+	double T  = intensity16(info->ref, xL, yL - 1);
+	double TR = intensity16(info->ref, xL + 1, yL + 1);
+	double R  = intensity16(info->ref, xL + 1, yL);
+	double L  = intensity16(info->ref, xL - 1, yL);
+	double BL = intensity16(info->ref, xL - 1, yL + 1);
+	double B  = intensity16(info->ref, xL, yL + 1);
+	double BR = intensity16(info->ref, xL + 1, yL + 1);
+	double nx = (TR + 2.0 * R + BR) - (TL + 2.0 * L + BL);
+	double ny = (BL + 2.0 * B + BR) - (TL + 2.0 * T + TR);
+	double nz = 1.0 / info->strength;
+	double mag = sqrt(nx*nx + ny*ny + nz*nz);
 	if (mag != 0) {
-		dX /= mag;
-		dY /= mag;
-		dZ /= mag;
+		nx /= mag;
+		ny /= mag;
+		nz /= mag;
 	}
 
-	// invert depth
+	// SECOND PASS -- SAMPLER
+	if (info->useSampler) {
+		double source_sample = intensity16(info->ref, xL, yL);
+		double sx = 0;
+		double sy = 0;
+		double sz = 1.0 / info->strength;
+		for (int i = 0; i < info->samples; ++i) {
+			double noise_s = source_sample;
+			double noise_x = xL * ((xL + yL) % 2 == 0 ? 1 : -1);
+			double noise_y = yL * ((xL + yL) % 2 == 0 ? 1 : -1);
+			double noise_i = i / 100.0 * (source_sample > 0.5 ? 1 : -1);
+			double rand1 = prand(noise_x + noise_s, noise_y + noise_s, info->seed + noise_i);
+			double rand2 = prand(noise_y - noise_s, noise_x - noise_s, info->seed - noise_i);
+			double angle = rand1 * PI_2;
+			double dist = rand2 * info->sample_radius;
+			double sin_a = sin(angle);
+			double cos_a = cos(angle);
+			int samp_x = (int)round(xL + cos_a * dist);
+			int samp_y = (int)round(yL + sin_a * dist);
+			double sample = intensity16(info->ref, samp_x, samp_y);
+			if (sample != source_sample) {
+				double f = dist / info->sample_radius;
+				double t = 1.0 - (f + (f - f*f));
+				sx += cos_a * t * sample;
+				sy += sin_a * t * sample;
+			}
+		}
+		double mag = sqrt(sx*sx + sy*sy + sz*sz);
+		if (mag != 0) {
+			sx /= mag;
+			sy /= mag;
+			sz /= mag;
+		}
+		nx = blend(nx, sx, info->blend);
+		ny = blend(ny, sy, info->blend);
+		nz = blend(nz, sz, info->blend);
+	}
+
+
+	// INVERT
 	if (info->invert) {
-		dX *= -1;
-		dY *= -1;
+		nx *= -1;
+		ny *= -1;
 	}
 
-	// set pixel
+	// SET PIXEL
 	outP->alpha = inP->alpha;
-	outP->red = (A_u_short)(((dX + 1) / 2) * PF_MAX_CHAN16);
-	outP->green = (A_u_short)(((dY + 1) / 2) * PF_MAX_CHAN16);
-	outP->blue = (A_u_short)(((dZ + 1) / 2) * PF_MAX_CHAN16);
-
-	return err;
-}
-
-static PF_Err Normal8(
-	void *refcon,
-	A_long xL,
-	A_long yL,
-	PF_Pixel8 *inP,
-	PF_Pixel8 *outP
-) {
-	PF_Err err = PF_Err_NONE;
-	register NormalInfo *info = (NormalInfo*)refcon;
-
-	// get pixel intensity
-	int width = info->ref->width - 1;
-	int height = info->ref->height - 1;
-	double TL = getIntensity8(getPixel8(info->ref, clamp(xL - 1, width), clamp(yL - 1, height)));
-	double T  = getIntensity8(getPixel8(info->ref, xL, clamp(yL - 1, height)));
-	double TR = getIntensity8(getPixel8(info->ref, clamp(xL + 1, width), clamp(yL + 1, height)));
-	double R  = getIntensity8(getPixel8(info->ref, clamp(xL + 1, width), yL));
-	double L  = getIntensity8(getPixel8(info->ref, clamp(xL - 1, width), yL));
-	double BL = getIntensity8(getPixel8(info->ref, clamp(xL - 1, width), clamp(yL + 1, height)));
-	double B  = getIntensity8(getPixel8(info->ref, xL, clamp(yL + 1, height)));
-	double BR = getIntensity8(getPixel8(info->ref, clamp(xL + 1, width), clamp(yL + 1, height)));
-
-	// Sobel filter
-	double dX = (TR + 2.0 * R + BR) - (TL + 2.0 * L + BL);
-	double dY = (BL + 2.0 * B + BR) - (TL + 2.0 * T + TR);
-	double dZ = 1.0 / info->strength;
-
-	// normalise
-	double mag = sqrt(dX * dX + dY * dY + dZ * dZ);
-	if (mag != 0) {
-		dX /= mag;
-		dY /= mag;
-		dZ /= mag;
-	}
-
-	// invert depth
-	if (info->invert) {
-		dX *= -1;
-		dY *= -1;
-	}
-
-	// set pixel
-	outP->alpha = inP->alpha;
-	outP->red = (A_u_char)(((dX + 1) / 2) * PF_MAX_CHAN8);
-	outP->green = (A_u_char)(((dY + 1) / 2) * PF_MAX_CHAN8);
-	outP->blue = (A_u_char)(((dZ + 1) / 2) * PF_MAX_CHAN8);
-
+	outP->red = (A_u_short)(((nx + 1) / 2) * PF_MAX_CHAN16);
+	outP->green = (A_u_short)(((ny + 1) / 2) * PF_MAX_CHAN16);
+	outP->blue = (A_u_short)(((nz + 1) / 2) * PF_MAX_CHAN16);
 	return err;
 }
 
@@ -129,12 +181,18 @@ Render(
 	NormalInfo info;
 	PF_EffectWorld *inputP = &params[INPUT_LAYER]->u.ld;
 
-	// get ui
+	// UI
 	AEFX_CLR_STRUCT(info);
 	info.strength = ((double)params[PARAM_STRENGTH]->u.fs_d.value);
 	info.invert = (int)((params[PARAM_INVERT]->u.bd.value));
+	info.useSampler = (int)((params[PARAM_USE_SAMPLER]->u.bd.value));
+	info.samples = ((int)params[PARAM_SAMPLES]->u.sd.value);
+	info.sample_radius = ((double)params[PARAM_SAMPLE_RADIUS]->u.fs_d.value);
+	info.blend = ((double)params[PARAM_BLEND]->u.fs_d.value) / 100.0;
 	info.ref = inputP;
 	info.in_data = *in_data;
+	info.seed = (1 + in_data->current_time) / 100.0;
+	info.flat_threshold = 1 / 100.0;
 
 	if (PF_WORLD_IS_DEEP(output)) {
 		ERR(suites.Iterate16Suite1()->iterate(in_data, 0, linesL, inputP, NULL, (void*)&info, Normal16, output));
@@ -153,12 +211,28 @@ static PF_Err ParamsSetup(
 ) {
 	PF_ParamDef	def;
 	
-	// define ui
+	// DEFAULTS
+	int strength = 1;
+	int invert = 0;
+	int use_sampler = 0;
+	int samples = 50;
+	int sample_radius = 20;
+	int blend = 40;
+
+	// UI
 	AEFX_CLR_STRUCT(def);
-	PF_ADD_FLOAT_SLIDER("Strength", 1, 100, 0, 10, 0, 1, 0, 0, 0, PARAM_STRENGTH);
+	PF_ADD_FLOAT_SLIDER("Strength", 1, 100, 0, 10, 0, strength, 0, 0, 0, PARAM_STRENGTH);
 	AEFX_CLR_STRUCT(def);
-	PF_ADD_CHECKBOXX("Invert", 0, 0, PARAM_INVERT);
+	PF_ADD_CHECKBOXX("Invert", invert, 0, PARAM_INVERT);
 	AEFX_CLR_STRUCT(def);
+	PF_ADD_CHECKBOXX("Use Sampler", use_sampler, 0, PARAM_USE_SAMPLER);
+	AEFX_CLR_STRUCT(def);
+	PF_ADD_SLIDER("Samples", 0, 1000, 0, 100, samples, PARAM_SAMPLES);
+	AEFX_CLR_STRUCT(def);
+	PF_ADD_FLOAT_SLIDER("Sample Radius", 1, 20000, 1, 100, 0, sample_radius, 0, 0, 0, PARAM_SAMPLE_RADIUS);
+	AEFX_CLR_STRUCT(def);
+	PF_ADD_FLOAT_SLIDER("Blend", 0, 100, 0, 100, 0, blend, 0, 0, 0, PARAM_BLEND);
+	
 	out_data->num_params = PARAM_COUNT;
 
 	return PF_Err_NONE;
@@ -182,7 +256,7 @@ static PF_Err About(
 	PF_LayerDef *output
 ) {
 	AEGP_SuiteHandler suites(in_data->pica_basicP);
-	suites.ANSICallbacksSuite1()->sprintf(out_data->return_msg, "%s v%d.%d\r%s", "Colour Halftone", MAJOR_VERSION, MINOR_VERSION, "Normalmapping by @meatbags");
+	suites.ANSICallbacksSuite1()->sprintf(out_data->return_msg, "%s v%d.%d\r%s", "Normal Mapping", MAJOR_VERSION, MINOR_VERSION, "Normalmapping by @meatbags");
 	return PF_Err_NONE;
 }
 
